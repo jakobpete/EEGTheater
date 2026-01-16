@@ -94,5 +94,64 @@ If you have access to a **vendor “pre-screened / ASR” stream**, it is genera
   - `pylsl` (online/LSL input if applicable)
 
 Install (example):
-```bash
+bash
 pip install numpy scipy matplotlib pylsl
+
+
+TouchDesigner note: if running inside TD, packages must be installed into TD’s Python environment (or loaded via a managed environment).
+
+How to Run
+Offline (recorded file → features → plots)
+
+From repository root:
+
+python pipeline/offline_feature_test_with_baseline_file.py
+
+
+You may need to edit:
+
+BASELINE_EDF_PATH
+
+ANALYSIS_EDF_PATH
+
+If your EDF contains MNE annotations (e.g., T0/T1/T2), the script can overlay them in plots for validation.
+
+Online / pseudo-realtime
+python pipeline/online_pipeline.py
+
+
+Typical configuration to check:
+
+LSL stream selection (name/type)
+
+window length / step size
+
+channel mapping (C3/C4 availability)
+
+output interface (TD internal parameters / OSC / etc.)
+
+TouchDesigner Integration
+
+Current design intent:
+
+The feature logic is written so it can run directly in TouchDesigner Python.
+
+The same eeg_features/ utilities are imported in both offline and online scripts.
+
+Output parameters are intended to be stable (normalized, smoothed, clamped), so TD mapping is predictable.
+
+Notes / Caveats
+
+These EEG markers are control signals, not medical or psychological diagnostics.
+
+Motor imagery detection is sensitive to movement and muscle artifacts; keep the performer still.
+
+Windowing introduces latency; this is expected and acceptable for stage use.
+
+License
+
+(Decide: MIT / private / TBD)
+
+Contact / Credits
+
+Developed by Jakob Niedermann for an EEG-driven theater / installation workflow.
