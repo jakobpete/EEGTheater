@@ -335,10 +335,11 @@ def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title:
     p_csp = ema(p_csp, EMA_ALPHA_CSP)
 
     # Bandpower probabilities (use SAME channel selection)
-    roi_picks = picks
+    # NOTE: `data` is ALREADY restricted to `picks` (shape = n_sel_ch x n_times),
+    # so we must NOT index again with raw-channel indices.
     X_bp_win = []
     for i, s in enumerate(starts):
-        seg = data[:, s: s + win_samp][roi_picks]
+        seg = data[:, s: s + win_samp]  # (n_sel_ch, win_samp)
         feats = []
         for band in BANDS.values():
             feats.append(log_bandpower(seg, sfreq=sfreq, band=band))
@@ -521,7 +522,9 @@ for test_run in RUNS:
     train_epochs = [build_epochs_mi_rest(raw_by_run[r]) for r in train_runs]
     epochs_train = mne.concatenate_epochs(train_epochs)
 
-    X_train = epochs_train.get_data()
+    # Use SAME channel selection for training as for online simulation
+    train_picks = pick_channels(epochs_train)
+    X_train = epochs_train.get_data(picks=train_picks)
     y_train = (epochs_train.events[:, 2] == epochs_train.event_id["mi"]).astype(int)
 
     # Train a fresh model ONLY on training runs
@@ -536,7 +539,7 @@ for test_run in RUNS:
 
     X_bp = []
     for ep in X_train:
-        ep_roi = ep[roi_picks]
+        ep_roi = ep
         feats = []
         for band in BANDS.values():
             feats.append(log_bandpower(ep_roi, sfreq=epochs_train.info["sfreq"], band=band))
@@ -620,7 +623,9 @@ for test_run in RUNS:
 all_epochs = [build_epochs_mi_rest(raw_by_run[r]) for r in RUNS]
 epochs_all = mne.concatenate_epochs(all_epochs)
 
-X_all = epochs_all.get_data()
+# Use SAME channel selection for final model as well
+final_picks = pick_channels(epochs_all)
+X_all = epochs_all.get_data(picks=final_picks)
 y_all = (epochs_all.events[:, 2] == epochs_all.event_id["mi"]).astype(int)
 
 final_csp = CSP(n_components=CSP_COMPONENTS, reg="ledoit_wolf", log=True, norm_trace=False)
@@ -633,7 +638,7 @@ roi_picks_all = pick_channels(epochs_all)
 
 X_bp_all = []
 for ep in X_all:
-    ep_roi = ep[roi_picks_all]
+    ep_roi = ep
     feats = []
     for band in BANDS.values():
         feats.append(log_bandpower(ep_roi, sfreq=epochs_all.info["sfreq"], band=band))

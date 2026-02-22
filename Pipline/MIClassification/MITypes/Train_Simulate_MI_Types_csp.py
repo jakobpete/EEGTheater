@@ -22,7 +22,7 @@ import joblib
 # -----------------------
 # Config
 # -----------------------
-SUBJECT = "S002"
+SUBJECT = "S001"
 
 # Imagined BOTH FISTS vs BOTH FEET runs in EEGMMIDB:
 # R06/R10/R14 = Task 4 (imagine both fists vs both feet)
@@ -41,7 +41,7 @@ CSP_COMPONENTS = 4
 # "all"           : use all EEG channels
 # "distributed16" : 16 channels distributed across scalp
 # "motor_roi"     : motor-area channels (C3/Cz/C4 + neighbors)
-CHANNEL_GROUP = "all"
+CHANNEL_GROUP = "motor_roi"
 
 DISTRIBUTED_16_NAMES = [
     "Fp1", "Fp2",
@@ -100,8 +100,10 @@ def load_and_preprocess_raw(edf_path: Path) -> mne.io.BaseRaw:
     picks, picks_desc = resolve_picks(raw)
     raw.filter(FREQ_BAND[0], FREQ_BAND[1], fir_design="firwin", picks=picks)
     raw.notch_filter([NOTCH], picks=picks)
-    raw.info["_custom_picks"] = picks
-    raw.info["_custom_picks_desc"] = picks_desc
+    # Store run-specific picks in Info.temp (supported by MNE for temporary objects)
+    raw.info.setdefault("temp", {})
+    raw.info["temp"]["custom_picks"] = picks
+    raw.info["temp"]["custom_picks_desc"] = picks_desc
     return raw
 
 
@@ -241,7 +243,11 @@ def build_gt_masks_fists_feet(raw: mne.io.BaseRaw):
 def simulate_online_on_raw_types(raw: mne.io.BaseRaw, csp_clf, title: str, do_plot: bool = True):
     """Sliding-window simulation on a run, but scoring only on windows that are inside MI segments."""
     sfreq = raw.info["sfreq"]
-    picks = raw.info.get("_custom_picks")
+    temp = raw.info.get("temp", {}) if isinstance(raw.info.get("temp", {}), dict) else {}
+    picks = temp.get("custom_picks")
+    if picks is None:
+        # Fallback: all EEG channels
+        picks = mne.pick_types(raw.info, eeg=True, meg=False, eog=False, ecg=False, stim=False, exclude="bads")
     data = raw.get_data(picks=picks)
 
     n_samp = raw.n_times
@@ -462,7 +468,10 @@ for test_run in RUNS:
     train_epochs = [build_epochs_fists_vs_feet(raw_by_run[r]) for r in train_runs]
     epochs_train = mne.concatenate_epochs(train_epochs)
 
-    picks = raw_by_run[train_runs[0]].info.get("_custom_picks")
+    temp = raw_by_run[train_runs[0]].info.get("temp", {}) if isinstance(raw_by_run[train_runs[0]].info.get("temp", {}), dict) else {}
+    picks = temp.get("custom_picks")
+    if picks is None:
+        picks = mne.pick_types(raw_by_run[train_runs[0]].info, eeg=True, meg=False, eog=False, ecg=False, stim=False, exclude="bads")
     X_train = epochs_train.get_data(picks=picks)
     y_train = (epochs_train.events[:, 2] == epochs_train.event_id["feet"]).astype(int)  # fists=0, feet=1
 
@@ -497,7 +506,10 @@ print(f"Block-acc:  CSP={mean_csp_block:.3f}")
 all_epochs = [build_epochs_fists_vs_feet(raw_by_run[r]) for r in RUNS]
 epochs_all = mne.concatenate_epochs(all_epochs)
 
-picks = raw_by_run[RUNS[0]].info.get("_custom_picks")
+temp = raw_by_run[RUNS[0]].info.get("temp", {}) if isinstance(raw_by_run[RUNS[0]].info.get("temp", {}), dict) else {}
+picks = temp.get("custom_picks")
+if picks is None:
+    picks = mne.pick_types(raw_by_run[RUNS[0]].info, eeg=True, meg=False, eog=False, ecg=False, stim=False, exclude="bads")
 X_all = epochs_all.get_data(picks=picks)
 y_all = (epochs_all.events[:, 2] == epochs_all.event_id["feet"]).astype(int)
 
@@ -523,7 +535,7 @@ meta = {
     "win_len": WIN_LEN,
     "win_step": WIN_STEP,
     "channel_group": CHANNEL_GROUP,
-    "channel_desc": raw_by_run[RUNS[0]].info.get("_custom_picks_desc"),
+    "channel_desc": (raw_by_run[RUNS[0]].info.get("temp", {}) or {}).get("custom_picks_desc"),
 }
 joblib.dump(meta, MODEL_DIR / f"{final_prefix}_META.joblib")
 
