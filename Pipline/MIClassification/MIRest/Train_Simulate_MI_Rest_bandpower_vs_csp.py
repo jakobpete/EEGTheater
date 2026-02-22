@@ -1,5 +1,3 @@
-# Save this file as simulate_online_MI_Rest_bandpower_vs_csp.py to run the comparison of CSP+LDA vs Bandpower+LogReg
-
 import numpy as np
 import mne
 from pathlib import Path
