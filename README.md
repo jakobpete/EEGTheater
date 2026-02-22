@@ -1,157 +1,254 @@
-# EEG Theater Pipeline (TouchDesigner + Python)
+# EEGTheater
 
-This repository contains a compact EEG feature-extraction pipeline developed for a theater / installation context.  
-The goal is to derive **stable, stage-safe control parameters** (e.g., alpha/theta markers and motor imagery proxies) from EEG streams and feed them into an interactive system (TouchDesigner).
+EEGTheater is a modular EEG processing pipeline for real-time **Motor Imagery (MI)** decoding in an artistic / stage performance context (SOLARIS theatre project).
 
-The codebase supports:
+This repository contains **two complementary pipelines**:
 
-- **Offline validation** on recorded datasets (with annotations/events if present)
-- **Online / pseudo-realtime processing** (designed to be embedded in TouchDesigner Python)
+- **Pipeline A – PhysioNet-based experiments:** offline benchmarking and rapid prototyping on a public dataset.
+- **Pipeline B – Own data (LSL → FIF → training):** cue presentation + recording + training for models intended for stage deployment.
+
+The decoding logic is structured as a **two-stage cascade**:
+
+- **Stage 1:** MI vs Rest (probability `p(MI)`)
+- **Stage 2:** MI Type (Fists vs Feet; probability `p(feet)` where class 1 = feet, class 0 = fists)
+
+Stage 2 is intended to be evaluated **only when Stage 1 indicates MI** (gate).
 
 ---
 
 ## Repository Structure
 
-pipeline/
-offline_.py
-online_.py
-README.md
-ExampleData/
-... EDF files, sample recordings, etc.
-eeg_features/
-init.py
-normalization.py
-
-
-
-### `pipeline/ExampleData/`
-Sample EEG recordings for offline testing and debugging.  
-Typical usage: test your feature logic against known paradigms (e.g., motor imagery datasets).
-
-### `pipeline/eeg_features/`
-Small, reusable utilities that are used by both scripts:
-
-- **Normalization / baselining** helpers (z-score based, stage-safe clamping, optional smoothing)
-- **Preprocessing utilities** (e.g., average reference, bandpass, light artifact hygiene)  
-  *(Exact contents depend on what is currently committed — the intention is to keep this folder as the “portable core.”)*
-
-### Scripts
-- **Offline script**  
-  Runs sliding-window feature extraction on recorded data and plots features against time (optionally overlaying annotations).
-- **Online script**  
-  Runs the same feature logic in a pseudo-realtime mode (intended for LSL input and TouchDesigner integration).
+```text
+├── Pipline
+│   ├── ExampleData
+│   │   ├── S001/
+│   │   ├── S002/
+│   │   └── S003/
+│   ├── MIClassification
+│   │   ├── MIRest
+│   │   │   ├── models/
+│   │   │   ├── Train_MI_Rest_from_fif.py
+│   │   │   └── Train_Simulate_MI_Rest_bandpower_vs_csp.py
+│   │   ├── MIRestTypes
+│   │   │   ├── Sanity_Check_2Stages.py
+│   │   │   └── tryout_S001_two_stages.py
+│   │   └── MITypes
+│   │       ├── models/
+│   │       ├── Train_MI_Types_from_fif.py
+│   │       └── Train_Simulate_MI_Types_csp.py
+│   └── Training_Data_Acquisition
+│       ├── lsl_record_to_fif.py
+│       ├── mi_cues_markers.py
+│       └── recordings/
+├── README.md
+```
 
 ---
 
-## What the Pipeline Computes
+## Training Data Source (Pipeline A)
 
-### 1) Relaxation / Arousal / Internal Orientation
-Typical robust markers (baseline-relative):
+The initial models and simulation scripts were developed and validated using a publicly available benchmark dataset:
 
-- **Theta power (4–8 Hz)**
-- **Alpha power (8–12 Hz)**
-- **Theta/Alpha ratio**
-- Optional smoothing and clamping for stable control signals
+**PhysioNet EEG Motor Movement/Imagery Dataset (EEGMMIDB)**
 
-Interpretation is **state-level**, not diagnostic:
-- Alpha/theta dynamics can indicate shifts toward calm vs active-internal modes.
+```text
+https://www.physionet.org/content/eegmmidb/1.0.0/
+```
 
-### 2) Motor Imagery (MI)
-Motor imagery is modeled via **ERD-like behavior** (baseline-relative decrease) in:
-
-- **Mu band (8–13 Hz) over C3/C4**
-- **Beta band (13–30 Hz) over C3/C4** (optional second evidence channel)
-
-Derived indices:
-- `mi_global`: global MI engagement proxy (negative relative shifts = ERD-like)
-- `mi_lateral`: lateralization proxy (C3 vs C4 difference)
+This dataset contains motor imagery and motor movement recordings (including fists and feet) collected under controlled laboratory conditions. Performance obtained on this dataset is **not a guarantee** for stage conditions; final tuning must be done with your own recordings.
 
 ---
 
-## Preprocessing Philosophy (Stage-Safe)
+## Concept: Two-Stage MI Classifier
 
-This project deliberately aims for **robustness and controllability** over maximal offline-clean neuroscience.
+### Stage 1 – MI vs Rest
 
-Typical minimal preprocessing steps:
-1. **(Optional) per-channel de-mean**
-2. **Average reference** (improves spatial interpretability, especially MI)
-3. **Bandpass 1–40 Hz** (stabilizes bandpower features)
-4. **Baseline normalization** (critical for comparability and drift resistance)
-5. **Smoothing and clamping** (prevents unstable jumps in output parameters)
+**Goal:** Detect whether the subject is performing Motor Imagery.
 
-If you have access to a **vendor “pre-screened / ASR” stream**, it is generally preferred for online use.
+- Input: continuous EEG
+- Output: probability `p(MI)`
+- Methods used in this repo: **CSP + LDA** (and optional comparison vs bandpower-based baseline in the PhysioNet script)
+
+### Stage 2 – MI Type (Fists vs Feet)
+
+**Goal:** If MI is detected, classify which imagery type is performed.
+
+- Input: EEG windows during MI
+- Output: probability `p(feet)` (class 1 = feet, class 0 = fists)
+- Method used in this repo: **CSP + LDA**
+
+### Cascade usage
+
+```text
+EEG → Stage 1 (MI vs Rest)
+        ↓ if MI detected (gate)
+        Stage 2 (Fists vs Feet)
+```
 
 ---
 
-## Setup
+## Pipeline A: PhysioNet-Based Experiments
 
-### Requirements
-- Python 3.10+ recommended (TouchDesigner uses its own Python runtime)
-- Core Python packages typically used:
-  - `numpy`
-  - `scipy` (if bandpass/notch is used outside MNE)
-  - `matplotlib` (offline plots)
-  - `pylsl` (online/LSL input if applicable)
+These scripts are primarily for algorithm development and benchmarking.
 
-Install (example):
-bash
-pip install numpy scipy matplotlib pylsl
+### Stage 1 (MI vs Rest) – PhysioNet
 
+- Script: `Pipline/MIClassification/MIRest/Train_Simulate_MI_Rest_bandpower_vs_csp.py`
+- Purpose:
+  - load EDF runs
+  - filter
+  - train MI vs Rest
+  - validate (leave-one-run-out)
+  - simulate sliding-window probability stream
+  - save models
 
-TouchDesigner note: if running inside TD, packages must be installed into TD’s Python environment (or loaded via a managed environment).
+### Stage 2 (Fists vs Feet) – PhysioNet
 
-How to Run
-Offline (recorded file → features → plots)
+- Script: `Pipline/MIClassification/MITypes/Train_Simulate_MI_Types_csp.py`
+- Purpose:
+  - train T1 (fists) vs T2 (feet)
+  - validate (leave-one-run-out)
+  - save model
 
-From repository root:
+> Note: These scripts assume PhysioNet-style EDF naming (`S###R##.edf`) and that you place data under `Pipline/ExampleData/S00X/`.
 
-python pipeline/offline_feature_test_with_baseline_file.py
+---
 
+## Pipeline B: Own Data (LSL → FIF → Training)
 
-You may need to edit:
+Pipeline B is designed for collecting and training on **your own recordings** (stage-relevant conditions).
 
-BASELINE_EDF_PATH
+### B1. Cue Presentation + Marker Stream
 
-ANALYSIS_EDF_PATH
+- Script: `Pipline/Training_Data_Acquisition/mi_cues_markers.py`
+- What it does:
+  - presents visual cues (colors; optional text)
+  - broadcasts markers via LSL
+  - labels:
+    - `T0` = Rest
+    - `T1` = Fists MI
+    - `T2` = Feet MI
+- Controls:
+  - `ESC` → stop immediately
+  - `SPACE` → skip cue (marker alignment preserved)
 
-If your EDF contains MNE annotations (e.g., T0/T1/T2), the script can overlay them in plots for validation.
+### B2. Record EEG + Markers to FIF
 
-Online / pseudo-realtime
-python pipeline/online_pipeline.py
+- Script: `Pipline/Training_Data_Acquisition/lsl_record_to_fif.py`
+- What it does:
+  - records EEG LSL stream + marker LSL stream
+  - saves a time-locked `*_raw.fif` with MNE annotations
+- Output directory:
+  - `Pipline/Training_Data_Acquisition/recordings/`
 
+### B3. Train Stage 1 + Stage 2 on Own Recordings
 
-Typical configuration to check:
+- Stage 1: `Pipline/MIClassification/MIRest/Train_MI_Rest_from_fif.py`
+- Stage 2: `Pipline/MIClassification/MITypes/Train_MI_Types_from_fif.py`
 
-LSL stream selection (name/type)
+Both scripts:
+- load the recorded FIF
+- extract windows from T0/T1/T2
+- train CSP + LDA
+- save joblib models into their respective `models/` folders
 
-window length / step size
+### B4. Sanity Check (Pseudo-Online)
 
-channel mapping (C3/C4 availability)
+- Script: `Pipline/MIClassification/MIRestTypes/Sanity_Check_2Stages.py`
+- What it does:
+  - loads Stage 1 + Stage 2 joblib models
+  - slides windows through the recording
+  - computes `p(MI)` and gated `p(feet)`
+  - plots outputs aligned with annotations
 
-output interface (TD internal parameters / OSC / etc.)
+This is the recommended verification step before integrating into TouchDesigner.
 
-TouchDesigner Integration
+---
 
-Current design intent:
+## Quickstart (Own Data)
 
-The feature logic is written so it can run directly in TouchDesigner Python.
+Run the cue script and recorder in parallel, then train and sanity-check.
 
-The same eeg_features/ utilities are imported in both offline and online scripts.
+### 1) Cue presentation (Terminal A)
 
-Output parameters are intended to be stable (normalized, smoothed, clamped), so TD mapping is predictable.
+```bash
+python Pipline/Training_Data_Acquisition/mi_cues_markers.py
+```
 
-Notes / Caveats
+### 2) Record EEG + markers (Terminal B)
 
-These EEG markers are control signals, not medical or psychological diagnostics.
+```bash
+python Pipline/Training_Data_Acquisition/lsl_record_to_fif.py
+```
 
-Motor imagery detection is sensitive to movement and muscle artifacts; keep the performer still.
+### 3) Train Stage 1 (MI vs Rest)
 
-Windowing introduces latency; this is expected and acceptable for stage use.
+```bash
+python Pipline/MIClassification/MIRest/Train_MI_Rest_from_fif.py
+```
 
-License
+### 4) Train Stage 2 (Fists vs Feet)
 
-(Decide: MIT / private / TBD)
+```bash
+python Pipline/MIClassification/MITypes/Train_MI_Types_from_fif.py
+```
 
-Contact / Credits
+### 5) Sanity check the full cascade
 
-Developed by Jakob Niedermann for an EEG-driven theater / installation workflow.
+```bash
+python Pipline/MIClassification/MIRestTypes/Sanity_Check_2Stages.py
+```
+
+---
+
+## Channel Selection (CHANNEL_GROUP)
+
+Stage 1 and Stage 2 training scripts support a single knob:
+
+```python
+CHANNEL_GROUP = "all"          # use all EEG channels
+# or
+CHANNEL_GROUP = "distributed16"  # distributed subset
+# or
+CHANNEL_GROUP = "motor_roi"      # motor cortex ROI (e.g. C3/Cz/C4 neighborhood)
+```
+
+If channels are properly named (C3/Cz/C4 etc.), selection is name-based; otherwise the scripts fall back to index-based picks until a device-specific channel map is provided.
+
+**Important:** Keep channel selection consistent between training and online deployment.
+
+---
+
+## Parameters to Revalidate on Real Device Data
+
+When switching from PhysioNet to real stage recordings, the following parameters often need retuning:
+
+- frequency band (`FREQ_BAND`)
+- epoch timing (`TMIN`, `TMAX`)
+- CSP components (`CSP_COMPONENTS`)
+- online windowing (`WIN_LEN`, `WIN_STEP`)
+- Stage-1 gate settings (threshold/dwell/refractory; used in sanity checks / later deployment)
+
+---
+
+## Troubleshooting
+
+- LSL streams must be active and discoverable before recording.
+- On macOS, if `pylsl` cannot find `liblsl`, install via conda-forge (`liblsl`) or Homebrew.
+- You can stop recordings early; training just needs enough examples:
+  - Stage 1 needs T0 and (T1/T2)
+  - Stage 2 needs both T1 and T2
+
+---
+
+## Current Project State
+
+- Stage 1 and Stage 2 training scripts implemented
+- PhysioNet simulation scripts implemented
+- Two-stage pseudo-online sanity check implemented
+- Models exported as joblib for later deployment (e.g. TouchDesigner)
+
+Next steps:
+- validate with real device data
+- tune thresholds / dwell for reliable stage behavior
+- integrate real-time inference into TouchDesigner and map outputs to visuals/audio
