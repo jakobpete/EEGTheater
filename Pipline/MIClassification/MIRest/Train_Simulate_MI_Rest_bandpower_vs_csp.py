@@ -24,20 +24,47 @@ RUNS = [6, 10, 14]
 FREQ_BAND = (8.0, 20.0)
 NOTCH = 60.0
 
+# -----------------------
+# Channel selection (ONE knob for both CSP + Bandpower)
+# -----------------------
+# "all"           : use all EEG channels
+# "distributed16" : 16 channels distributed across scalp
+# "motor_roi"     : motor-area channels (C3/Cz/C4 + neighbors)
+CHANNEL_GROUP = "all"
+
+DISTRIBUTED_16_NAMES = [
+    "Fp1", "Fp2",
+    "F3", "F4",
+    "C3", "C4",
+    "P3", "P4",
+    "O1", "O2",
+    "F7", "F8",
+    "T7", "T8",
+    "P7", "P8",
+]
+
+MOTOR_ROI_NAMES = [
+    "FC3", "FCz", "FC4",
+    "C3", "Cz", "C4",
+    "CP3", "CPz", "CP4",
+]
+
+# Fallback indices if channel names don't match (clipped to available channels)
+DISTRIBUTED_16_INDEX_FALLBACK = [0, 1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29]
+MOTOR_ROI_INDEX_FALLBACK = [6, 7, 8, 14, 15, 16, 22, 23, 24]
+
 # Bandpower detector configuration
 BANDS = {
     "mu": (8.0, 12.0),
     "beta": (13.0, 20.0),
 }
-# Motor ROI (10-10 names). We'll pick those present in the recording.
-ROI_CHANNELS = ["C3", "Cz", "C4", "FC3", "FCz", "FC4", "CP3", "CPz", "CP4"]
 
 # These define the "meaningful" segment after an imagery onset marker (T1/T2)
 # T0 marks rest onsets. We treat windows after T0 as "rest" examples.
 TMIN = 1.0
 TMAX = 4.0
 
-#CSP COMPONENTS
+# CSP COMPONENTS
 CSP_COMPONENTS = 4
 
 # Online simulation windowing
@@ -47,23 +74,20 @@ THRESH = 0.5       # probability threshold for MI
 
 # Smoothing (EMA) for probability streams (helps online stability)
 EMA_ALPHA_BP = 0.15   # 0.05–0.30 reasonable; higher = more smoothing
-    # EMA_ALPHA_CSP controls temporal smoothing of the *output probability* of the CSP+LDA classifier.
-    # IMPORTANT: this does NOT affect training or the classifier itself.
-    # It only smooths the probability stream over time during online / simulated use.
-    #
-    # alpha = 0.0  -> no smoothing (raw CSP probabilities, best for evaluation/debugging)
-    # alpha ~0.05  -> strong smoothing (very stable but delayed response)
-    # alpha ~0.1–0.2 -> moderate smoothing (good compromise for online use)
-    #
-    # Use smoothing only at runtime (e.g. on stage) to reduce jitter and false positives.
-    # Keep it at 0.0 when evaluating classifier performance.
+# EMA_ALPHA_CSP controls temporal smoothing of the *output probability* of the CSP+LDA classifier.
+# IMPORTANT: this does NOT affect training or the classifier itself.
+# It only smooths the probability stream over time during online / simulated use.
+#
+# alpha = 0.0    -> no smoothing (raw CSP probabilities, best for evaluation/debugging)
+# alpha ~0.05    -> strong smoothing (very stable but delayed response)
+# alpha ~0.1–0.2 -> moderate smoothing (good compromise for online use)
+#
+# Use smoothing only at runtime (e.g. on stage) to reduce jitter and false positives.
+# Keep it at 0.0 when evaluating classifier performance.
 EMA_ALPHA_CSP = 0.00  # keep 0.00 to not smooth CSP; set e.g. 0.10 if you want both smoothed
 
 # Block-detection scoring
 MIN_OVERLAP_S = 0.25   # minimum overlap (seconds) to count a predicted block as matching a true MI block
-
-# Plot Configs
-
 
 # -----------------------
 # Paths
@@ -92,16 +116,18 @@ def print_config():
     print(f"  FREQ_BAND         : {FREQ_BAND}")
     print(f"  NOTCH             : {NOTCH}")
 
+    print("\nChannel selection:")
+    print(f"  CHANNEL_GROUP     : {CHANNEL_GROUP}")
+
     print("\nBandpower:")
     print(f"  BANDS             : {BANDS}")
-    print(f"  ROI_CHANNELS      : {ROI_CHANNELS}")
 
     print("\nEpoching:")
     print(f"  TMIN              : {TMIN}")
     print(f"  TMAX              : {TMAX}")
 
-    PRINT("\CSP-Components:")
-    print(f"  CSP-Components           : {CSP_COMPONENTS}")
+    print("\nCSP:")
+    print(f"  CSP_COMPONENTS    : {CSP_COMPONENTS}")
 
     print("\nOnline windowing:")
     print(f"  WIN_LEN           : {WIN_LEN}")
@@ -117,6 +143,7 @@ def print_config():
 
     print("=" * 60 + "\n")
 
+
 def load_and_preprocess_raw(edf_path: Path) -> mne.io.BaseRaw:
     raw = mne.io.read_raw_edf(str(edf_path), preload=True, verbose=False)
     raw.filter(FREQ_BAND[0], FREQ_BAND[1], fir_design="firwin")
@@ -124,17 +151,43 @@ def load_and_preprocess_raw(edf_path: Path) -> mne.io.BaseRaw:
     return raw
 
 
-def pick_roi(raw: mne.io.BaseRaw):
-    ch_names = [c.upper() for c in raw.ch_names]
-    roi_upper = [c.upper() for c in ROI_CHANNELS]
-    picks = []
-    for roi in roi_upper:
-        if roi in ch_names:
-            picks.append(ch_names.index(roi))
-    if len(picks) < 3:
-        # fallback to all EEG if montage labels differ
-        picks = mne.pick_types(raw.info, eeg=True, exclude="bads")
-    return np.array(picks, dtype=int)
+def _pick_by_names_or_fallback(ch_names: list[str], wanted_names: list[str], fallback_idx: list[int]) -> np.ndarray:
+    """Pick channels by (case-insensitive) name; if too few found, use fallback indices."""
+    upper = [c.upper() for c in ch_names]
+    wanted_upper = [w.upper() for w in wanted_names]
+    picks = [upper.index(w) for w in wanted_upper if w in upper]
+
+    if len(picks) >= 3:
+        return np.array(picks, dtype=int)
+
+    n = len(ch_names)
+    picks_fb = [i for i in fallback_idx if 0 <= i < n]
+    return np.array(picks_fb, dtype=int)
+
+
+def pick_channels(obj) -> np.ndarray:
+    """Return channel picks according to CHANNEL_GROUP.
+
+    This ONE selection is used for BOTH CSP+LDA and Bandpower+LogReg.
+    Accepts Raw or Epochs.
+    """
+    info = obj.info
+    ch_names = obj.ch_names
+
+    if CHANNEL_GROUP == "all":
+        return mne.pick_types(info, eeg=True, exclude="bads")
+
+    if CHANNEL_GROUP == "distributed16":
+        picks = _pick_by_names_or_fallback(ch_names, DISTRIBUTED_16_NAMES, DISTRIBUTED_16_INDEX_FALLBACK)
+    elif CHANNEL_GROUP == "motor_roi":
+        picks = _pick_by_names_or_fallback(ch_names, MOTOR_ROI_NAMES, MOTOR_ROI_INDEX_FALLBACK)
+    else:
+        raise ValueError(f"Unknown CHANNEL_GROUP={CHANNEL_GROUP!r} (use 'all', 'distributed16', or 'motor_roi')")
+
+    if picks.size == 0:
+        picks = mne.pick_types(info, eeg=True, exclude="bads")
+
+    return picks
 
 
 def build_epochs_mi_rest(raw: mne.io.BaseRaw) -> mne.Epochs:
@@ -234,7 +287,7 @@ def ema(x: np.ndarray, alpha: float) -> np.ndarray:
 def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title: str, do_plot: bool = True):
     """Sliding-window simulation on a *single* run."""
     sfreq = raw.info["sfreq"]
-    picks = mne.pick_types(raw.info, eeg=True, exclude="bads")
+    picks = pick_channels(raw)
     data = raw.get_data(picks=picks)
 
     n_samp = raw.n_times
@@ -275,19 +328,19 @@ def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title:
     y_true = np.zeros(len(starts), dtype=int)
 
     for i, s in enumerate(starts):
-        X_win[i] = data[:, s : s + win_samp]
-        frac_mi = gt_mi[s : s + win_samp].mean()
+        X_win[i] = data[:, s: s + win_samp]
+        frac_mi = gt_mi[s: s + win_samp].mean()
         y_true[i] = 1 if frac_mi >= 0.5 else 0
 
     # CSP+LDA probabilities
     p_csp = csp_clf.predict_proba(X_win)[:, 1]
     p_csp = ema(p_csp, EMA_ALPHA_CSP)
 
-    # Bandpower probabilities
-    roi_picks = pick_roi(raw)
+    # Bandpower probabilities (use SAME channel selection)
+    roi_picks = picks
     X_bp_win = []
     for i, s in enumerate(starts):
-        seg = data[:, s : s + win_samp][roi_picks]
+        seg = data[:, s: s + win_samp][roi_picks]
         feats = []
         for band in BANDS.values():
             feats.append(log_bandpower(seg, sfreq=sfreq, band=band))
@@ -318,7 +371,7 @@ def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title:
         pred_mi = np.zeros(n_samp, dtype=bool)
         for s, prob in zip(starts, p):
             if prob >= THRESH:
-                pred_mi[s : s + win_samp] = True
+                pred_mi[s: s + win_samp] = True
 
         def contiguous_intervals(mask: np.ndarray):
             """Return list of (start_samp, end_samp) for contiguous True regions."""
@@ -341,7 +394,7 @@ def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title:
 
         matched_pred = set()
 
-        for gi, (gs, ge) in enumerate(gt_intervals):
+        for (gs, ge) in gt_intervals:
             # Find any predicted interval that overlaps enough
             best_pi = None
             for pi, (ps, pe) in enumerate(pred_intervals):
@@ -356,13 +409,12 @@ def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title:
                 tp += 1
                 matched_pred.add(best_pi)
                 # latency: first predicted sample within the true MI block minus true onset
-                ps, pe = pred_intervals[best_pi]
+                ps, _ = pred_intervals[best_pi]
                 first_in = max(gs, ps)
                 latencies.append((first_in - gs) / sfreq)
 
         for pi in range(len(pred_intervals)):
             if pi not in matched_pred:
-                # count only those that don't overlap any true MI block sufficiently
                 fp += 1
 
         recall = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
@@ -419,14 +471,11 @@ def simulate_online_on_raw(raw: mne.io.BaseRaw, csp_clf, bp_clf, bp_norm, title:
 
         ax.plot(mid_times, p_csp, linewidth=1.5, label="CSP+LDA")
         ax.plot(mid_times, p_bp, linewidth=1.5, label="Bandpower+LogReg")
-        # ax.plot(mid_times, p_bp + p_csp, linewidth=1, label="Addition")
         ax.axhline(THRESH, linestyle="--", linewidth=1)
 
         ax.set_title(title + f" | win={WIN_LEN}s step={WIN_STEP}s | acc_csp={acc_csp:.3f} | acc_bp={acc_bp:.3f}")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("p(MI)")
-        # ax.set_ylim(-0.05, 1.05)
-
         ax.legend(loc="upper right")
 
         ax.text(
@@ -478,18 +527,17 @@ for test_run in RUNS:
     y_train = (epochs_train.events[:, 2] == epochs_train.event_id["mi"]).astype(int)
 
     # Train a fresh model ONLY on training runs
-    csp = CSP(n_components=CSP_COMPONENTS
-    , reg="ledoit_wolf", log=True, norm_trace=False)
+    csp = CSP(n_components=CSP_COMPONENTS, reg="ledoit_wolf", log=True, norm_trace=False)
     lda = LinearDiscriminantAnalysis()
     clf = Pipeline([("csp", csp), ("lda", lda)])
     clf.fit(X_train, y_train)
 
     # Train bandpower detector on the same training runs
-    # Build features from epochs_train (ROI channels)
-    roi_picks = pick_roi(epochs_train)
+    # Build features from epochs_train (SAME channel selection)
+    roi_picks = pick_channels(epochs_train)
+
     X_bp = []
     for ep in X_train:
-        # ep shape: (n_ch, n_times)
         ep_roi = ep[roi_picks]
         feats = []
         for band in BANDS.values():
@@ -519,28 +567,33 @@ for test_run in RUNS:
     bp_path = MODEL_DIR / f"{prefix}_BANDPOWER_LOGREG.joblib"
     meta_path = MODEL_DIR / f"{prefix}_META.joblib"
 
-    '''
+    # NOTE: fold saving is currently disabled (kept from your previous version).
+    # Uncomment if you want per-fold models saved too.
+    """
     # 1) Save CSP+LDA pipeline
     joblib.dump(clf, csp_path)
 
-    # 2) Save Bandpower+LogReg model + normalization
+    # 2) Save Bandpower+LogReg model + normalization + channel selection metadata
     joblib.dump(
         {
             "model": bp_clf,
             "bp_norm": bp_norm,  # (mean, std)
             "bands": BANDS,
-            "roi_channels": ROI_CHANNELS,
+            "channel_group": CHANNEL_GROUP,
+            "channels_used": [epochs_train.ch_names[i] for i in pick_channels(epochs_train)],
         },
         bp_path,
     )
 
-    # 3) Save metadata (helps you verify channel order / preprocessing later)
+    # 3) Save metadata
     meta = {
         "subject": SUBJECT,
         "held_out_run": int(test_run),
         "train_runs": [int(r) for r in train_runs],
         "freq_band": FREQ_BAND,
         "notch": NOTCH,
+        "channel_group": CHANNEL_GROUP,
+        "channels_used": [epochs_train.ch_names[i] for i in pick_channels(epochs_train)],
         "tmin": TMIN,
         "tmax": TMAX,
         "win_len": WIN_LEN,
@@ -550,12 +603,17 @@ for test_run in RUNS:
         "sfreq": float(raw_by_run[test_run].info["sfreq"]),
     }
     joblib.dump(meta, meta_path)
-    '''
+    """
     print("Saved fold CSP+LDA model to:", csp_path)
     print("Saved fold Bandpower+LogReg model to:", bp_path)
     print("Saved fold META to:", meta_path)
 
-    print(f"Held-out R{test_run:02d} window-acc CSP: {stats['window_acc_csp']:.3f} | window-acc BP: {stats['window_acc_bp']:.3f} | block recall CSP: {stats['csp_recall']:.3f} | block recall BP: {stats['bp_recall']:.3f}")
+    print(
+        f"Held-out R{test_run:02d} window-acc CSP: {stats['window_acc_csp']:.3f} | "
+        f"window-acc BP: {stats['window_acc_bp']:.3f} | "
+        f"block recall CSP: {stats['csp_recall']:.3f} | "
+        f"block recall BP: {stats['bp_recall']:.3f}"
+    )
     accs.append(stats)
 
 # -----------------------
@@ -572,8 +630,9 @@ final_lda = LinearDiscriminantAnalysis()
 final_csp_lda = Pipeline([("csp", final_csp), ("lda", final_lda)])
 final_csp_lda.fit(X_all, y_all)
 
-# Bandpower features for ALL runs
-roi_picks_all = pick_roi(epochs_all)
+# Bandpower features for ALL runs (SAME channel selection)
+roi_picks_all = pick_channels(epochs_all)
+
 X_bp_all = []
 for ep in X_all:
     ep_roi = ep[roi_picks_all]
@@ -599,13 +658,14 @@ final_meta_path = MODEL_DIR / f"{final_prefix}_META.joblib"
 # 1) Save CSP+LDA pipeline
 joblib.dump(final_csp_lda, final_csp_path)
 
-# 2) Save Bandpower+LogReg model + normalization
+# 2) Save Bandpower+LogReg model + normalization + channel selection metadata
 joblib.dump(
     {
         "model": final_bp_clf,
         "bp_norm": (bp_mean_all, bp_std_all),
         "bands": BANDS,
-        "roi_channels": ROI_CHANNELS,
+        "channel_group": CHANNEL_GROUP,
+        "channels_used": [epochs_all.ch_names[i] for i in pick_channels(epochs_all)],
     },
     final_bp_path,
 )
@@ -616,6 +676,8 @@ final_meta = {
     "train_runs": [int(r) for r in RUNS],
     "freq_band": FREQ_BAND,
     "notch": NOTCH,
+    "channel_group": CHANNEL_GROUP,
+    "channels_used": [epochs_all.ch_names[i] for i in pick_channels(epochs_all)],
     "tmin": TMIN,
     "tmax": TMAX,
     "win_len": WIN_LEN,
@@ -630,15 +692,15 @@ print("Saved FINAL CSP+LDA model to:", final_csp_path)
 print("Saved FINAL Bandpower+LogReg model to:", final_bp_path)
 print("Saved FINAL META to:", final_meta_path)
 
-mean_acc_csp = float(np.mean([s['window_acc_csp'] for s in accs]))
-std_acc_csp = float(np.std([s['window_acc_csp'] for s in accs]))
-mean_recall_csp = float(np.mean([s['csp_recall'] for s in accs]))
-std_recall_csp = float(np.std([s['csp_recall'] for s in accs]))
-mean_fpmin_csp = float(np.mean([s['csp_fp_per_min'] for s in accs]))
+mean_acc_csp = float(np.mean([s["window_acc_csp"] for s in accs]))
+std_acc_csp = float(np.std([s["window_acc_csp"] for s in accs]))
+mean_recall_csp = float(np.mean([s["csp_recall"] for s in accs]))
+std_recall_csp = float(np.std([s["csp_recall"] for s in accs]))
+mean_fpmin_csp = float(np.mean([s["csp_fp_per_min"] for s in accs]))
 
-mean_acc_bp = float(np.mean([s['window_acc_bp'] for s in accs]))
-mean_recall_bp = float(np.mean([s['bp_recall'] for s in accs]))
-mean_fpmin_bp = float(np.mean([s['bp_fp_per_min'] for s in accs]))
+mean_acc_bp = float(np.mean([s["window_acc_bp"] for s in accs]))
+mean_recall_bp = float(np.mean([s["bp_recall"] for s in accs]))
+mean_fpmin_bp = float(np.mean([s["bp_fp_per_min"] for s in accs]))
 
 print_config()
 
