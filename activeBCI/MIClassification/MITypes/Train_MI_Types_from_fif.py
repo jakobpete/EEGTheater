@@ -16,7 +16,7 @@ Key difference vs PhysioNet script:
 - We extract sliding windows from inside each segment (excluding transition buffer).
 
 Outputs:
-  - joblib model payload to Pipline/MIClassification/MITypes/models/
+  - joblib model payload to activeBCI/MIClassification/MITypes/models/
 """
 
 from __future__ import annotations
@@ -41,7 +41,7 @@ import joblib
 # CONFIG
 # -----------------------
 
-RECORDINGS_DIR = Path("Pipline/Training_Data_Acquisition/recordings")
+RECORDINGS_DIR = Path("activeBCI/Training_Data_Acquisition/recordings")
 
 # Choose input FIF:
 RAW_FIF_PATH: Optional[Path] = None  # set explicitly OR use AUTO_PICK_NEWEST
@@ -104,7 +104,7 @@ CSP_REG = "ledoit_wolf"
 CV_SPLITS = 5
 
 # Output
-MODEL_DIR = Path("Pipline/MIClassification/MITypes/models")
+MODEL_DIR = Path("activeBCI/MIClassification/MITypes/models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = f"Stage2_FISTS_vs_FEET_CSP_LDA_{CHANNEL_GROUP}.joblib"

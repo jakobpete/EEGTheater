@@ -42,7 +42,7 @@ import joblib
 # -----------------------
 
 # Where your recorder writes output:
-RECORDINGS_DIR = Path("Pipline/Training_Data_Acquisition/recordings")
+RECORDINGS_DIR = Path("activeBCI/Training_Data_Acquisition/recordings")
 
 # Pick the FIF you want to train on:
 # Option A: set explicitly
@@ -110,7 +110,7 @@ CSP_REG = "ledoit_wolf"   # regularized covariance helps robustness
 CV_FOLDS = 5
 
 # Output
-MODEL_DIR = Path("Pipline/MIClassification/MIRest/models")
+MODEL_DIR = Path("activeBCI/MIClassification/MIRest/models")
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_NAME = f"Stage1_MI_vs_REST_CSP_LDA_{CHANNEL_GROUP}.joblib"
 

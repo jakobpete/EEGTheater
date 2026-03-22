@@ -56,7 +56,7 @@ from pylsl import StreamInfo, StreamOutlet
 # Session identity (used in filenames and LSL source_id)
 SUBJECT = "Tryout_01"
 SESSION_TAG = "MI_TRAINING"
-OUTDIR = Path("Pipline/Training_Data_Acquisition/recordings")
+OUTDIR = Path("activeBCI/Training_Data_Acquisition/recordings")
 
 # LSL stream identity for event markers (must match the recorder script)
 LSL_MARKER_STREAM_NAME = "MI_Markers"

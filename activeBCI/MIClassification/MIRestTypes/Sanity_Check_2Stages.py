@@ -20,10 +20,10 @@ What it does
 
 Usage
 -----
-python Pipline/MIClassification/debug_pseudo_online_cascade.py \
-  --fif Pipline/Training_Data_Acquisition/recordings/Tryout_01_MI_TRAINING_20260213_135551_raw.fif \
-  --stage1 Pipline/MIClassification/MIRest/models/Stage1_MI_vs_REST_CSP_LDA_all.joblib \
-  --stage2 Pipline/MIClassification/MITypes/models/Stage2_FISTS_vs_FEET_CSP_LDA_all.joblib \
+python activeBCI/MIClassification/debug_pseudo_online_cascade.py \
+  --fif activeBCI/Training_Data_Acquisition/recordings/Tryout_01_MI_TRAINING_20260213_135551_raw.fif \
+  --stage1 activeBCI/MIClassification/MIRest/models/Stage1_MI_vs_REST_CSP_LDA_all.joblib \
+  --stage2 activeBCI/MIClassification/MITypes/models/Stage2_FISTS_vs_FEET_CSP_LDA_all.joblib \
   --mi-thr 0.8 --dwell 1.0 --refractory 2.0
 
 Notes

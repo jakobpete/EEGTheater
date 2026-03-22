@@ -5,7 +5,7 @@
 # and includes an "online-like" sliding window simulation restricted to MI segments.
 #
 # Saves final deployment model trained on ALL runs in:
-#   Pipline/MIClassification/MITypes/models/
+#   activeBCI/MIClassification/MITypes/models/
 
 import numpy as np
 import mne
@@ -84,8 +84,8 @@ RNG_SEED = 42
 # -----------------------
 # Paths
 # -----------------------
-# This file lives in: Pipline/MIClassification/MITypes/
-PIPELINE_DIR = Path(__file__).resolve().parents[2]  # .../Pipline
+# This file lives in: activeBCI/MIClassification/MITypes/
+PIPELINE_DIR = Path(__file__).resolve().parents[2]  # .../activeBCI
 DATA_DIR = PIPELINE_DIR / "ExampleData" / SUBJECT
 
 MODEL_DIR = Path(__file__).resolve().parent / "models"

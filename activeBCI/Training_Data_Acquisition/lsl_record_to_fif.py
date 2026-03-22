@@ -15,7 +15,7 @@ from pylsl import resolve_streams, StreamInlet
 # CONFIG
 # -----------------------
 # OUTDIR = Path("recordings")
-OUTDIR = Path("Pipline/Training_Data_Acquisition/recordings")
+OUTDIR = Path("activeBCI/Training_Data_Acquisition/recordings")
 SUBJECT = "Tryout_01"
 SESSION_TAG = "MI_TRAINING"
 
